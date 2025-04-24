@@ -1,4 +1,6 @@
 services:
-  python:
-    build: ./runner/python
+  runner:
+    build: ./runner
     privileged: true
+    ports:
+      - "8080:8080"
