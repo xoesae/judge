@@ -1,12 +1,18 @@
 package http
 
 import (
+	"encoding/json"
 	"github.com/xoesae/judge/runner/internal/config"
 	"github.com/xoesae/judge/runner/internal/filesystem"
 	"github.com/xoesae/judge/runner/internal/jail"
 	"net/http"
 	"path/filepath"
 )
+
+type ProcessResultResponse struct {
+	Output string `json:"output"`
+	Error  string `json:"error"`
+}
 
 func handleRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -38,8 +44,13 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("STDOUT:\n"))
-	w.Write(result.Output)
-	w.Write([]byte("\nSTDERR:\n"))
-	w.Write(result.Error)
+	response := ProcessResultResponse{
+		Output: string(result.Output),
+		Error:  string(result.Error),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(response)
 }

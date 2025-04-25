@@ -2,17 +2,30 @@ package jail
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/xoesae/judge/runner/internal/config"
 	"github.com/xoesae/judge/runner/internal/filesystem"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"syscall"
 )
 
+type ExecutionStatus string
+
+const (
+	NoError      ExecutionStatus = "NO_ERROR"
+	MemoryLimit  ExecutionStatus = "MEMORY_LIMIT"
+	RuntimeError ExecutionStatus = "RUNTIME_ERROR"
+	Timeout      ExecutionStatus = "TIMEOUT"
+)
+
 type ProcessResult struct {
-	Output []byte
-	Error  []byte
+	Output   []byte
+	Error    ExecutionStatus
+	ExitCode int
 }
 
 func RunIsolated(scriptFilePath string) {
@@ -35,17 +48,49 @@ func RunIsolated(scriptFilePath string) {
 	}
 
 	// execute the python file
-
-	// TODO: exec the nsjail command
-	cmd := exec.Command("/usr/bin/python3", scriptFilePath)
+	nsjailPath := "/bin/nsjail"
+	cmd := exec.Command(nsjailPath,
+		"--mode", "o",
+		"--chroot", "/",
+		"--proc_rw",
+		"--quiet",
+		"--disable_clone_newnet",
+		"--disable_clone_newuser",
+		"--disable_clone_newns",
+		"--disable_clone_newpid",
+		"--disable_clone_newipc",
+		"--disable_clone_newuts",
+		"--disable_clone_newcgroup",
+		// TODO: add this value to a variable param
+		"--time_limit", "10", // (seconds)
+		// TODO: add this value to a variable param
+		"--rlimit_as", "15", // (MB)
+		"--", "/usr/bin/python3", scriptFilePath,
+	)
 
 	// capture the stdout and the stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	code := "0"
+
 	if err := cmd.Run(); err != nil {
-		fmt.Println("error on run script:", err)
+		var exitError *exec.ExitError
+
+		if errors.As(err, &exitError) {
+			c := exitError.ExitCode()
+			code = strconv.Itoa(c)
+
+			// writing the exit code in the stderr
+			cmd.Stderr.Write([]byte("[code]" + code + "[code]"))
+			return
+		}
+
+		fmt.Println("error:", err)
+		return
 	}
+
+	cmd.Stderr.Write([]byte("[code]" + code + "[code]"))
 }
 
 func InitChildProcess(filename string) (ProcessResult, error) {
@@ -72,8 +117,39 @@ func InitChildProcess(filename string) (ProcessResult, error) {
 		return ProcessResult{}, err
 	}
 
-	return ProcessResult{
-		Output: stdout.Bytes(),
-		Error:  stderr.Bytes(),
-	}, nil
+	result := ProcessResult{
+		Output:   stdout.Bytes(),
+		Error:    NoError,
+		ExitCode: 0,
+	}
+
+	rgx := regexp.MustCompile(`\[code](.*?)\[code]`)
+	matches := rgx.FindStringSubmatch(stderr.String())
+
+	// debug status code
+	fmt.Println(stderr.String())
+
+	exitCode, err := strconv.Atoi(matches[1])
+	if err != nil {
+		panic(err)
+	}
+
+	// generic
+	if exitCode != 0 {
+		result.Error = RuntimeError
+	}
+
+	// memory limit
+	if exitCode == 139 {
+		result.Error = MemoryLimit
+	}
+
+	// timeout
+	if exitCode == 137 {
+		result.Error = Timeout
+	}
+
+	result.ExitCode = exitCode
+
+	return result, nil
 }

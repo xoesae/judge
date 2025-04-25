@@ -13,7 +13,7 @@ RUN apt-get -y update && apt-get install -y \
 RUN mkdir -p /rootfs && \
     debootstrap --variant=minbase bookworm /rootfs http://deb.debian.org/debian && \
     chroot /rootfs apt-get update && \
-    chroot /rootfs apt-get install -y python3 && \
+    chroot /rootfs apt-get install -y python3 libc6 libstdc++6 libprotobuf32 libnl-route-3-200 autoconf bison flex gcc g++ git libprotobuf-dev libnl-route-3-dev libtool make pkg-config protobuf-compiler bash coreutils && \
     chroot /rootfs apt-get clean && \
     rm -rf /rootfs/var/lib/apt/lists/*
 
@@ -55,7 +55,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o main cmd/
 
 FROM base AS run
 
-COPY --from=build /nsjail/nsjail /bin/nsjail
+COPY --from=build /nsjail/nsjail /rootfs/bin/nsjail
 COPY --from=go-builder /app/main .
 COPY --from=base /rootfs /tmp/myroot
 
